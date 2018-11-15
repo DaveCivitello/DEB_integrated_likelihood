@@ -17,20 +17,6 @@ system("R CMD SHLIB IndividualModel_Shrink_P.c")
 dyn.load("IndividualModel_Shrink_P.dll") # Load dll
 
 
-# sim.data = rnorm(1000, mean=4, sd=1)
-# mean(sim.data)
-# sd(sim.data)
-# 
-# density_func = function(x){
-#   sum(dnorm(sim.data, mean=x[1], sd=x[2], log=T))
-# }
-# 
-# test = MCMC(density_func, init=c("mean"=2, "sd"=2), scale=c(0.1, 0.1), adapt=T, acc.rate = 0.35, n=1000)
-# 
-# testc = convert.to.coda(test)
-# plot(testc)
-
-
 
 #### Fixed information ####
 
@@ -317,12 +303,25 @@ make.states<-function(params, inits.F, inits.S, duration.F, duration.S, feeding.
               L2=result.S$LG, W2=result.S$RP, E2=result.S$RH, SurvF=Survival.F, SurvS=Survival.S))
 }
 
+## Variant of the make.states function that only simulates supply gradient experiment
+# make.states<-function(params, inits.F, inits.S, duration.F, duration.S, feeding.events.F, w.t=7){
+#   result.F = solve.DEB.food(params, inits.F, duration.F, feeding.events.F)
+#   result.F = extract.data(result.F, start.age=28)
+#   Survival.F = result.F$Survival
+#   
+#   # This fix for survival data is currently specific to the sample size (96) and duration (32) of the experiment
+#   Survival.F[-((1:96)*32)] =   Survival.F[-((1:96)*32)] - Survival.F[-(1+(0:95)*32)]
+#   
+#   return(list(time=result.F$time, L=result.F$LG, RH=result.F$RH, RP=result.F$RP, SurvF=Survival.F))
+# }
+
+
 # 5 - Prior likelihood
 prior.likelihood = function(x){
   prior.lik = with(as.list(x),
                    sum(dbeta(c(yPE, yEF, yEF2, yRP, yVE, mP, eh, k, fe), 1, 1, log=T)) + 
-                     sum(dunif(c(sd.LI1, sd.LU1, sd.EI1, sd.EU1, sd.W1, sd.LI2, sd.LU2, sd.EI2, sd.EU2, sd.W2), min=0, max=10, log=T)) +
-                     sum(dunif(c(ph, alpha, iPM, EM, DR, Fh, muD, kd, z, kk, theta, mR, hb), min=0, max=1000000, log=T)) +
+                     sum(dunif(c(sd.L, sd.E, sd.W), min=0, max=10, log=T)) +
+                     sum(dunif(c(ph, alpha, iPM, EM, DR, Fh, muD, kd, z, kk, theta, mR, hb, sd.LM), min=0, max=1000000, log=T)) +
                      dnorm(iM, mean=0.0183, sd=0.0016, log=T) + dnorm(M, mean=0.004, sd=0.00047, log=T) + dnorm(LM, mean=30, sd=1, log=T)
   )
   return(prior.lik)
@@ -330,6 +329,10 @@ prior.likelihood = function(x){
 
 
 integrated.likelihood = function(x){
+  # return terrible NLL for nonsensical parameters
+  prior.LL = prior.likelihood(x)
+  if(!is.finite(prior.LL)){return(-1e6)}
+  
   n=10
   # observation model
   gammaH<-0.015 # C content of eggs
@@ -352,15 +355,15 @@ integrated.likelihood = function(x){
     x["LM"] = LMs[i]
     sim.data[[i]] = make.states(x, in.F, in.S, dur.F, dur.S, Feed.F, w.t=7)
   }
-  NLL = 0
-  for(snail in 1:96){ # subsetting by snail
+  LL = 0
+  for(snail in 1:96){ # subsetting by snails in supply gradient experiment
     LL.ind = numeric()
     rows = 1:32 + (snail-1)*32
     snail.L = data$L[rows]
     snail.E = data$Negg[rows]
     snail.W = data$Nworms[rows]
     snail.death = which(data$Alive == 1)
-    for(i in 1:length(n)){ # scrolling over different values of random effect parameter
+    for(i in 1:n){ # scrolling over different values of random effect parameter
       if(length(sim.data[[i]]$L[rows]) != length(snail.L) | anyNA(sim.data[[i]]$RH[rows])){
         LL.ind[i] = -1e6
         next
@@ -370,145 +373,73 @@ integrated.likelihood = function(x){
                   sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$RP[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
                   sum(log(sim.data[[i]]$SurvF[snail.death[snail]])) + #indexing to snail to get death date of focal individual
                   log(probs[i])
-      }
+    }
     LL.ind_max = max(LL.ind)
     relative_probs = sum(exp(LL.ind - LL.ind_max))
-    NLL = NLL - (LL.ind_max + log(relative_probs))
+    LL = LL + (LL.ind_max + log(relative_probs))
   }
-  NLL
+  for(snail in 1:40){ # subsetting by snails in supply gradient experiment
+    LL.ind = numeric()
+    rows = 1:19 + (snail-1)*19
+    snail.L = data$L2[rows]
+    snail.E = data$Negg2[rows]
+    snail.W = data$Nworms2[rows]
+    snail.death = which(data$Alive2 == 1)
+    for(i in 1:n){ # scrolling over different values of random effect parameter
+        if(length(sim.data[[i]]$L2[rows]) != length(snail.L) | anyNA(sim.data[[i]]$E2[rows])){
+        LL.ind[i] = -1e6
+        next
+        }
+      LL.ind[i] = sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L2[rows]), sd=sd.L, log=T), na.rm=T) +
+        sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$E2[rows]/0.015), sd=sd.E, log=T), na.rm=T) +
+        sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$W2[rows]/4e-5), sd=sd.W, log=T), na.rm=T) +
+        sum(log(sim.data[[i]]$SurvS[snail.death[snail]])) + #indexing to snail to get death date of focal individual
+        log(probs[i])
+    }
+    LL.ind_max = max(LL.ind)
+    relative_probs = sum(exp(LL.ind - LL.ind_max))
+    LL = LL + (LL.ind_max + log(relative_probs))
+  }
+  LL + prior.LL
 }
-
-
-pars2 = pars[1:25]
-pars2["sd.LM"] = 0.1
-pars2["sd.L"] = pars["sd.LI1"]
-pars2["sd.E"] = pars["sd.EI1"]
-pars2["sd.W"] = pars["sd.W1"]
-integrated.likelihood(pars2)
-
-sd.LMs = 1:10/4
-NLLs = numeric()
-for(i in 1:length(sd.LMs)){
-  pars2["sd.LM"] = sd.LMs[i]
-  NLLs[i] = integrated.likelihood(pars2)
-  print(i)
-}
-plot(sd.LMs, NLLs)
-
-# 6 - data likelihood
-full.likelihood<-function(x){
-  
-  
-  
-  # simulate data
-  sim.data = make.states(x, in.F, in.S, dur.F, dur.S, Feed.F, w.t=7)
-  
-  # data likelihood
-  e.c<-1
-  
-  ## observation model
-
-  
-  ## convert predictions into correct count units
-  l.temp<-sim.data$L
-  n.temp<-sim.data$RH/gammaH
-  w.temp<-sim.data$RP/gammaP
-  
-  
-  l2.temp<-sim.data$L2
-  n2.temp<-sim.data$E2/gammaH
-  w2.temp<-sim.data$W2/gammaP
-  
-  SF.temp<-sim.data$SurvF
-  SS.temp<-sim.data$SurvS
-  
-  sd.LI1<-as.numeric(x["sd.LI1"])
-  sd.LU1<-as.numeric(x["sd.LU1"])
-  sd.EI1<-as.numeric(x["sd.EI1"])
-  sd.EU1<-as.numeric(x["sd.EU1"])
-  sd.W1<-as.numeric(x["sd.W1"])
-  
-  sd.LI2<-as.numeric(x["sd.LI2"])
-  sd.LU2<-as.numeric(x["sd.LU2"])
-  sd.EI2<-as.numeric(x["sd.EI2"])
-  sd.EU2<-as.numeric(x["sd.EU2"])
-  sd.W2<-as.numeric(x["sd.W2"])
-  
-  # Avoids simulations that fell short
-  NObs = length(data$L)
-  NObs2 = length(data$L2)
-  if(length(n.temp) != NObs){print("Simulation too short"); return(-1e6)}
-  if(length(n2.temp) != NObs2){print("Simulation too short"); return(-1e6)}    
-  
-  if(anyNA(l.temp)){print("NaNs in l.temp"); return(-1e6)}
-  if(anyNA(l2.temp)){print("NaNs in l2.temp"); return(-1e6)}
-  if(anyNA(SF.temp)){print("NaNs in SF.temp");return(-1e6)}
-  if(anyNA(SS.temp)){print("NaNs in SS.temp"); return(-1e6)}
-  
-  sds = c(rep(sd.LI1, times = 2112), rep(sd.LU1, times=960))
-  sd.Eggs = c(rep(sd.EI1, times = 2112), rep(sd.EU1, times=960))
-  
-  ## likelihoods from food gradient
-  llik.L<- sum(dnorm(log(data$L), mean=log(l.temp), sd=sds, log=TRUE), na.rm=T)
-  llik.Negg<- sum(dnorm(log(data$Negg+e.c), mean=log(n.temp+e.c), sd=sd.Eggs, log=TRUE), na.rm=T)
-  llik.Nworms<- sum(dnorm(log(data$Nworms+e.c), mean=log(w.temp+e.c), sd=sd.W1, log=TRUE), na.rm=T)
-  SF =SF.temp[which(data$Alive == 1)]
-  llik.Survival <- sum(log(SF))
-  
-  sds2 = c(rep(sd.LI2, times = 380), rep(sd.LU2, times=380))
-  sd.Eggs2 = c(rep(sd.EI2, times = 380), rep(sd.EU2, times=380))
-  
-  ## likelihoods from density gradient
-  llik.L2<- sum(dnorm(log(data$L2), mean=log(l2.temp), sd=sds2, log=TRUE), na.rm=T)
-  llik.Negg2<- sum(dnorm(log(data$Negg2+e.c), mean=log(n2.temp+e.c), sd=sd.Eggs2, log=TRUE), na.rm=T)
-  llik.Nworms2<- sum(dnorm(log(data$Nworms2+e.c), mean=log(w2.temp+e.c), sd=sd.W2, log=TRUE), na.rm=T)
-  
-  
-  SS =SS.temp[which(data$Alive2 == 1)]
-  llik.Survival2 <- sum(log(SS)) 
-  
-  llik<-(llik.L + llik.Negg + llik.Nworms + llik.Survival + llik.L2 + llik.Negg2 + llik.Nworms2 + llik.Survival2)
-  
-  if(is.na(llik)|!is.finite(llik)){
-    print("Infinite NLL")
-    return(-1e6)}
-  
-  lprior = prior.likelihood(x)
-  
-  return( (llik + lprior)/1)
-}
-
-
-
 
 ### Tuning ###
 
 setwd("C:/RData")
-samps = readRDS("FullStarve_shrink_adaptMCMC_original_DAM.Rda")
+samps = readRDS("ILL_adaptMCMC_original_DAM_shrink.Rda")
 pars = samps$samples[which.max(samps$log.p),]
-pars = as.numeric(pars[1:35])
+pars = as.numeric(pars[1:29])
 names(pars) = c("iM", "k", "M", "EM", "Fh", "muD", "DR", "fe", "yRP",
                 "ph", "yPE", "iPM", "eh", "mP", "alpha", "yEF", "LM",
-                "kd", "z", "kk", "hb", "theta", "mR", "yVE", "yEF2",
-                "sd.LI1", "sd.LU1", "sd.EI1", "sd.EU1", "sd.W1", 
-                "sd.LI2", "sd.LU2", "sd.EI2", "sd.EU2", "sd.W2")
+                "kd", "z", "kk", "hb", "theta", "mR", "yVE", "yEF2", "sd.LM", "sd.L", "sd.E", "sd.W")
 
-full.likelihood(pars)
+# # Quick check of random effect
+# integrated.likelihood(pars)
+# pars2 = pars
+# sd.LMs = c(0.5, 1, 2, 4, 8, 16, 32)
+# LLs = numeric()
+# for(i in 1:length(sd.LMs)){
+#   pars2["sd.LM"] = sd.LMs[i]
+#   LLs[i] = integrated.likelihood(pars2)
+#   print(i)
+# }
+# plot(sd.LMs, LLs)
+
 round(1 - rejectionRate(mcmc(samps$samples)), 2)
 
 variances = samps$cov.jump
-# 
-# ### running the mcmc ###
-# start.time = proc.time()
-# #test = MCMC(full.likelihood, init=pars, scale=as.matrix(variances), adapt=50000, acc.rate = 0.3, n=250000)
-# test = readRDS("FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
-# test = MCMC.add.samples(test, n.update=50000)
-# 
-# ### converting to coda
-# testc = convert.to.coda(test)
-# testc = cbind(testc, "lpost" = test$log.p)
-# round(1 - rejectionRate(mcmc(testc)), 3)
-# plot(1:length(testc[,"lpost"]), testc[,"lpost"])
-# saveRDS(test, file="FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
-# 
-# #test = MCMC.add.samples(test, n.update=10000)
+# variances = diag(29)
+# diag(variances) = as.numeric(pars)*1e-6
+
+### running the mcmc ###
+start.time = proc.time()
+test = MCMC(integrated.likelihood, init=pars, scale=as.matrix(variances), adapt=25, acc.rate = 0.3, n=25)
+
+### converting to coda
+testc = convert.to.coda(test)
+testc = cbind(testc, "lpost" = test$log.p)
+round(1 - rejectionRate(mcmc(testc)), 3)
+plot(1:length(testc[,"lpost"]), testc[,"lpost"])
+saveRDS(test, file="ILL_adaptMCMC_original_DAM_shrink.Rda")
+
+hist(testc[,"sd.LM"])
