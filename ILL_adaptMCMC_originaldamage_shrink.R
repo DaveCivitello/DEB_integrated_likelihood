@@ -361,14 +361,15 @@ integrated.likelihood = function(x){
     snail.W = data$Nworms[rows]
     snail.death = which(data$Alive == 1)
     for(i in 1:length(n)){ # scrolling over different values of random effect parameter
-      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | anyNA(sim.data[[i]]$L[rows])){
+      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | anyNA(sim.data[[i]]$RH[rows])){
         LL.ind[i] = -1e6
         next
       }
       LL.ind[i] = sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L[rows]), sd=sd.L, log=T), na.rm=T) + 
-                  sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$E[rows]/0.015), sd=sd.E, log=T), na.rm=T) + 
-                  sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$W[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
-                  sum(log(sim.data[[i]]$SurvF[snail.death])) + log(probs[i])
+                  sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$RH[rows]/0.015), sd=sd.E, log=T), na.rm=T) + 
+                  sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$RP[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
+                  sum(log(sim.data[[i]]$SurvF[snail.death[snail]])) + #indexing to snail to get death date of focal individual
+                  log(probs[i])
       }
     LL.ind_max = max(LL.ind)
     relative_probs = sum(exp(LL.ind - LL.ind_max))
@@ -385,7 +386,7 @@ pars2["sd.E"] = pars["sd.EI1"]
 pars2["sd.W"] = pars["sd.W1"]
 integrated.likelihood(pars2)
 
-sd.LMs = 1:20/8
+sd.LMs = 1:10/4
 NLLs = numeric()
 for(i in 1:length(sd.LMs)){
   pars2["sd.LM"] = sd.LMs[i]
