@@ -360,9 +360,11 @@ integrated.likelihood = function(x){
     snail.E = data$Negg[rows]
     snail.W = data$Nworms[rows]
     snail.death = which(data$Alive == 1)
-    #return(snail.L)
-    #return(sim.data[[1]]$L[rows])
     for(i in 1:length(n)){ # scrolling over different values of random effect parameter
+      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | anyNA(sim.data[[i]]$L[rows])){
+        LL.ind[i] = -1e6
+        next
+      }
       LL.ind[i] = sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L[rows]), sd=sd.L, log=T), na.rm=T) + 
                   sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$E[rows]/0.015), sd=sd.E, log=T), na.rm=T) + 
                   sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$W[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
@@ -378,9 +380,9 @@ integrated.likelihood = function(x){
 
 pars2 = pars[1:25]
 pars2["sd.LM"] = 0.1
-pars2["sd.L"] = 0.1
-pars2["sd.E"] = 1
-pars2["sd.W"] = 0.9
+pars2["sd.L"] = pars["sd.LI1"]
+pars2["sd.E"] = pars["sd.EI1"]
+pars2["sd.W"] = pars["sd.W1"]
 integrated.likelihood(pars2)
 
 sd.LMs = 1:20/8
@@ -494,18 +496,18 @@ full.likelihood(pars)
 round(1 - rejectionRate(mcmc(samps$samples)), 2)
 
 variances = samps$cov.jump
-
-### running the mcmc ###
-start.time = proc.time()
-#test = MCMC(full.likelihood, init=pars, scale=as.matrix(variances), adapt=50000, acc.rate = 0.3, n=250000)
-test = readRDS("FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
-test = MCMC.add.samples(test, n.update=50000)
-
-### converting to coda
-testc = convert.to.coda(test)
-testc = cbind(testc, "lpost" = test$log.p)
-round(1 - rejectionRate(mcmc(testc)), 3)
-plot(1:length(testc[,"lpost"]), testc[,"lpost"])
-saveRDS(test, file="FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
-
-#test = MCMC.add.samples(test, n.update=10000)
+# 
+# ### running the mcmc ###
+# start.time = proc.time()
+# #test = MCMC(full.likelihood, init=pars, scale=as.matrix(variances), adapt=50000, acc.rate = 0.3, n=250000)
+# test = readRDS("FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
+# test = MCMC.add.samples(test, n.update=50000)
+# 
+# ### converting to coda
+# testc = convert.to.coda(test)
+# testc = cbind(testc, "lpost" = test$log.p)
+# round(1 - rejectionRate(mcmc(testc)), 3)
+# plot(1:length(testc[,"lpost"]), testc[,"lpost"])
+# saveRDS(test, file="FullStarve_shrink_adaptMCMC_original_DAM_run1.Rda")
+# 
+# #test = MCMC.add.samples(test, n.update=10000)
