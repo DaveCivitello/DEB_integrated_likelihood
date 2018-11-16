@@ -364,7 +364,7 @@ integrated.likelihood = function(x){
     snail.W = data$Nworms[rows]
     snail.death = which(data$Alive == 1)
     for(i in 1:n){ # scrolling over different values of random effect parameter
-      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | anyNA(sim.data[[i]]$RH[rows])){
+      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | LMs[i] <= 0 | anyNA(sim.data[[i]]$RH[rows])){
         LL.ind[i] = -1e6
         next
       }
@@ -386,7 +386,7 @@ integrated.likelihood = function(x){
     snail.W = data$Nworms2[rows]
     snail.death = which(data$Alive2 == 1)
     for(i in 1:n){ # scrolling over different values of random effect parameter
-        if(length(sim.data[[i]]$L2[rows]) != length(snail.L) | anyNA(sim.data[[i]]$E2[rows])){
+        if(length(sim.data[[i]]$L2[rows]) != length(snail.L) | LMs[i] <= 0  | anyNA(sim.data[[i]]$E2[rows])){
         LL.ind[i] = -1e6
         next
         }
@@ -433,7 +433,7 @@ variances = samps$cov.jump
 
 ### running the mcmc ###
 start.time = proc.time()
-test = MCMC(integrated.likelihood, init=pars, scale=as.matrix(variances), adapt=25, acc.rate = 0.3, n=25)
+test = MCMC(integrated.likelihood, init=pars, scale=as.matrix(variances), adapt=100, acc.rate = 0.3, n=100)
 
 ### converting to coda
 testc = convert.to.coda(test)
@@ -442,4 +442,4 @@ round(1 - rejectionRate(mcmc(testc)), 3)
 plot(1:length(testc[,"lpost"]), testc[,"lpost"])
 saveRDS(test, file="ILL_adaptMCMC_original_DAM_shrink.Rda")
 
-hist(testc[,"sd.LM"])
+plot(1:length(testc[,"lpost"]), testc[,"sd.LM"])
