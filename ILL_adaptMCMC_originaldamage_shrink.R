@@ -1,6 +1,7 @@
 ### General adaptive MCMC ###
 library("adaptMCMC")
 library("deSolve")
+library("coda")
 
 rtools <- "C:\\Rtools\\bin"
 gcc <- "C:\\Rtools\\gcc-4.6.3\\bin"
@@ -321,7 +322,7 @@ prior.likelihood = function(x){
   prior.lik = with(as.list(x),
                    sum(dbeta(c(yPE, yEF, yEF2, yRP, yVE, mP, eh, k, fe), 1, 1, log=T)) + 
                      sum(dunif(c(sd.L, sd.E, sd.W), min=0, max=10, log=T)) +
-                     sum(dunif(c(ph, alpha, iPM, EM, DR, Fh, muD, kd, z, kk, theta, mR, hb, sd.LM), min=0, max=1000000, log=T)) +
+                     sum(dunif(c(ph, alpha, iPM, EM, DR, Fh, muD, kd, z, kk, theta, mR, hb, alpha.k), min=0, max=1000000, log=T)) +
                      dnorm(iM, mean=0.0183, sd=0.0016, log=T) + dnorm(M, mean=0.004, sd=0.00047, log=T) + dnorm(LM, mean=30, sd=1, log=T)
   )
   return(prior.lik)
@@ -343,16 +344,17 @@ integrated.likelihood = function(x){
   sd.W <- x["sd.W"] # on average, counting w/in 10% worms
   
   # random effect in parameter
-  sd.LM = x["sd.LM"]
-  LM.mean = x["LM"]
+  alpha.k = x["alpha.k"]
+  k.mean = x["k"]
+  beta.k = alpha.k*(1 - k.mean)/k.mean
   qs = seq(from= 0.001, to = 0.999, length.out = n) #select quantiles
-  LMs = qnorm(qs, mean=LM.mean, sd=sd.LM) # obtain random effect values
-  ds = dnorm(LMs, mean=LM.mean, sd=sd.LM) # get the density of these values
+  ks = qbeta(qs, shape1=alpha.k, shape2=beta.k) # obtain random effect values
+  ds = dbeta(ks, shape1=alpha.k, shape2=beta.k) # get the density of these values
   probs = ds/sum(ds)
   LLs = numeric()
   sim.data = list()
-  for(i in 1:length(LMs)){
-    x["LM"] = LMs[i]
+  for(i in 1:length(ks)){
+    x["k"] = ks[i]
     sim.data[[i]] = make.states(x, in.F, in.S, dur.F, dur.S, Feed.F, w.t=7)
   }
   LL = 0
@@ -364,15 +366,17 @@ integrated.likelihood = function(x){
     snail.W = data$Nworms[rows]
     snail.death = which(data$Alive == 1)
     for(i in 1:n){ # scrolling over different values of random effect parameter
-      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | LMs[i] <= 0 | anyNA(sim.data[[i]]$RH[rows])){
+      if(length(sim.data[[i]]$L[rows]) != length(snail.L) | ks[i] <= 0 | anyNA(sim.data[[i]]$RH[rows])){
         LL.ind[i] = -1e6
         next
       }
-      LL.ind[i] = sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L[rows]), sd=sd.L, log=T), na.rm=T) + 
-                  sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$RH[rows]/0.015), sd=sd.E, log=T), na.rm=T) + 
-                  sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$RP[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
-                  sum(log(sim.data[[i]]$SurvF[snail.death[snail]])) + #indexing to snail to get death date of focal individual
-                  log(probs[i])
+      LL.ind[i] = (sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L[rows]), sd=sd.L, log=T), na.rm=T) + 
+                     sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$RH[rows]/0.015), sd=sd.E, log=T), na.rm=T) + 
+                     sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$RP[rows]/4e-5), sd=sd.W, log=T), na.rm=T) + 
+                     #indexing to snail to get death date of focal individual
+                     sum(log(sim.data[[i]]$SurvF[snail.death[snail]])) + log(probs[i]))
+      
+      
     }
     LL.ind_max = max(LL.ind)
     relative_probs = sum(exp(LL.ind - LL.ind_max))
@@ -386,15 +390,16 @@ integrated.likelihood = function(x){
     snail.W = data$Nworms2[rows]
     snail.death = which(data$Alive2 == 1)
     for(i in 1:n){ # scrolling over different values of random effect parameter
-        if(length(sim.data[[i]]$L2[rows]) != length(snail.L) | LMs[i] <= 0  | anyNA(sim.data[[i]]$E2[rows])){
+      if(length(sim.data[[i]]$L2[rows]) != length(snail.L) | ks[i] <= 0  | anyNA(sim.data[[i]]$E2[rows])){
         LL.ind[i] = -1e6
         next
-        }
-      LL.ind[i] = sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L2[rows]), sd=sd.L, log=T), na.rm=T) +
-        sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$E2[rows]/0.015), sd=sd.E, log=T), na.rm=T) +
-        sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$W2[rows]/4e-5), sd=sd.W, log=T), na.rm=T) +
-        sum(log(sim.data[[i]]$SurvS[snail.death[snail]])) + #indexing to snail to get death date of focal individual
-        log(probs[i])
+      }
+      LL.ind[i] = (sum(dnorm(x=log(snail.L), mean=log(sim.data[[i]]$L2[rows]), sd=sd.L, log=T), na.rm=T) +
+                     sum(dnorm(x=log(snail.E+1), mean=log(1+sim.data[[i]]$E2[rows]/0.015), sd=sd.E, log=T), na.rm=T) +
+                     sum(dnorm(x=log(snail.W+1), mean=log(1+sim.data[[i]]$W2[rows]/4e-5), sd=sd.W, log=T), na.rm=T) +
+                     #indexing to snail to get death date of focal individual
+                     sum(log(sim.data[[i]]$SurvS[snail.death[snail]])) + log(probs[i]))
+      
     }
     LL.ind_max = max(LL.ind)
     relative_probs = sum(exp(LL.ind - LL.ind_max))
@@ -406,40 +411,42 @@ integrated.likelihood = function(x){
 ### Tuning ###
 
 setwd("C:/RData")
-samps = readRDS("ILL_adaptMCMC_original_DAM_shrink.Rda")
+samps = readRDS("ILL_adaptMCMC_original_DAM_shrink_k2.Rda")
 pars = samps$samples[which.max(samps$log.p),]
 pars = as.numeric(pars[1:29])
 names(pars) = c("iM", "k", "M", "EM", "Fh", "muD", "DR", "fe", "yRP",
                 "ph", "yPE", "iPM", "eh", "mP", "alpha", "yEF", "LM",
-                "kd", "z", "kk", "hb", "theta", "mR", "yVE", "yEF2", "sd.LM", "sd.L", "sd.E", "sd.W")
-
-# # Quick check of random effect
+                "kd", "z", "kk", "hb", "theta", "mR", "yVE", "yEF2", "alpha.k", "sd.L", "sd.E", "sd.W")
+#pars["alpha.k"] = 1000
+# Quick check of random effect
 # integrated.likelihood(pars)
 # pars2 = pars
-# sd.LMs = c(0.5, 1, 2, 4, 8, 16, 32)
+# alpha.ks = c(2, 5, 10, 15, 20, 30, 50)/1000
 # LLs = numeric()
-# for(i in 1:length(sd.LMs)){
-#   pars2["sd.LM"] = sd.LMs[i]
+# for(i in 1:length(alpha.ks)){
+#   pars2["alpha.k"] = alpha.ks[i]
 #   LLs[i] = integrated.likelihood(pars2)
 #   print(i)
 # }
-# plot(sd.LMs, LLs)
+# plot(alpha.ks, LLs)
 
 round(1 - rejectionRate(mcmc(samps$samples)), 2)
 
 variances = samps$cov.jump
 # variances = diag(29)
 # diag(variances) = as.numeric(pars)*1e-6
-
+#variances[26,26] = 10
 ### running the mcmc ###
 start.time = proc.time()
-test = MCMC(integrated.likelihood, init=pars, scale=as.matrix(variances), adapt=100, acc.rate = 0.3, n=100)
+test = MCMC(integrated.likelihood, init=pars, scale=as.matrix(variances), adapt=500, acc.rate = 0.3, n=500)
 
 ### converting to coda
 testc = convert.to.coda(test)
 testc = cbind(testc, "lpost" = test$log.p)
 round(1 - rejectionRate(mcmc(testc)), 3)
 plot(1:length(testc[,"lpost"]), testc[,"lpost"])
-saveRDS(test, file="ILL_adaptMCMC_original_DAM_shrink.Rda")
+saveRDS(test, file="ILL_adaptMCMC_original_DAM_shrink_k2.Rda")
 
-plot(1:length(testc[,"lpost"]), testc[,"sd.LM"])
+plot(1:length(testc[,"lpost"]), testc[,"alpha.k"])
+
+proc.time() - start.time
